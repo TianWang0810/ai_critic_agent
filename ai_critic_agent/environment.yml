@@ -1,6 +1,7 @@
 name: ai-critic-agent
 channels:
   - conda-forge
+  - pytorch
   - defaults
 
 dependencies:
@@ -11,15 +12,21 @@ dependencies:
   - pip
 
   # -----------------------------
-  # 基础工具
+  # 基础工具 (固定 NumPy 1.x)
   # -----------------------------
-  - numpy
+  - numpy=1.26.4  # 固定版本，避免 2.x
   - pandas
-  - tqdm
+  - tqdm>=4.65.0
   - pyyaml
 
   # -----------------------------
-  # Web / API（可选，但强烈推荐）
+  # PyTorch (Mac ARM 优化版本)
+  # -----------------------------
+  - pytorch::pytorch>=2.0.0
+  - pytorch::torchvision
+  
+  # -----------------------------
+  # Web / API
   # -----------------------------
   - fastapi
   - uvicorn
@@ -36,10 +43,14 @@ dependencies:
       # ===== OpenAI SDK =====
       - openai>=1.0.0
 
-      # ===== 向量数据库 =====
-      - faiss-cpu
-
-      # ===== Embedding / NLP =====
+      # ===== 向量数据库 (兼容 NumPy 1.x) =====
+      - faiss-cpu==1.7.4
+      
+      # ===== Embedding / NLP (兼容版本组合 - Mac M4 测试通过) =====
+      - sentence-transformers==2.2.2
+      - transformers==4.30.2
+      - huggingface-hub==0.16.4
+      - tokenizers==0.13.3
       - tiktoken
 
       # ===== 数据校验 / 结构化输出 =====
@@ -52,5 +63,5 @@ dependencies:
       - unstructured
       - markdown
 
-      # ===== CLI / 工具（可选） =====
+      # ===== CLI / 工具 =====
       - typer

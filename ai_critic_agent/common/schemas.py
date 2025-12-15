@@ -20,6 +20,7 @@ class RiskCategory(str, Enum):
     MONETIZATION = "monetization"
     USER_BEHAVIOR = "user_behavior"
     TIMING = "timing"
+    GENERAL = "general"  # General/综合失败案例
 
 
 class ImportanceLevel(str, Enum):

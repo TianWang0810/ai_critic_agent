@@ -1,0 +1,14 @@
+{
+  "total_documents": 27,
+  "total_chunks": 35,
+  "categories": {
+    "general": 3,
+    "timing": 4,
+    "execution": 4,
+    "user_behavior": 4,
+    "market": 12,
+    "competition": 4,
+    "monetization": 4
+  },
+  "embedding_dimension": 384
+}

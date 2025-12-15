@@ -1,0 +1,83 @@
+{
+  "data_loading": {
+    "total_files": 27,
+    "categories": {
+      "market": 4,
+      "competition": 4,
+      "execution": 4,
+      "monetization": 4,
+      "user_behavior": 4,
+      "timing": 4,
+      "general": 3
+    },
+    "passed": true
+  },
+  "index_building": {
+    "build_time": 2.92,
+    "stats": {
+      "total_documents": 27,
+      "total_chunks": 35,
+      "categories": {
+        "general": 3,
+        "timing": 4,
+        "execution": 4,
+        "user_behavior": 4,
+        "market": 12,
+        "competition": 4,
+        "monetization": 4
+      },
+      "embedding_dimension": 384
+    },
+    "passed": true
+  },
+  "retrieval": {
+    "basic_queries_passed": true
+  },
+  "quality": {
+    "pass_rate": 0.0,
+    "passed_tests": 0,
+    "total_tests": 6,
+    "details": [
+      {
+        "test": "Payment Willingness",
+        "results": 1,
+        "top_score": 0.31,
+        "status": "\u26a0\ufe0f  FAIL"
+      },
+      {
+        "test": "Free Alternative Competition",
+        "results": 2,
+        "top_score": 0.33,
+        "status": "\u26a0\ufe0f  FAIL"
+      },
+      {
+        "test": "Technical Feasibility",
+        "results": 1,
+        "top_score": 0.311,
+        "status": "\u26a0\ufe0f  FAIL"
+      },
+      {
+        "test": "CAC/LTV Balance",
+        "results": 2,
+        "top_score": 0.371,
+        "status": "\u26a0\ufe0f  FAIL"
+      },
+      {
+        "test": "User Behavior Change",
+        "results": 3,
+        "top_score": 0.373,
+        "status": "\u26a0\ufe0f  FAIL"
+      },
+      {
+        "test": "Market Timing",
+        "results": 4,
+        "top_score": 0.39,
+        "status": "\u26a0\ufe0f  FAIL"
+      }
+    ]
+  },
+  "cross_category": {
+    "categories_found": 4,
+    "passed": true
+  }
+}

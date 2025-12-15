@@ -23,6 +23,7 @@ RISK_CATEGORIES: List[str] = [
     RiskCategory.MONETIZATION.value,
     RiskCategory.USER_BEHAVIOR.value,
     RiskCategory.TIMING.value,
+    RiskCategory.GENERAL.value,  # 通用类别
 ]
 
 RISK_LEVELS: List[str] = [
@@ -54,7 +55,10 @@ EVIDENCE_CATEGORIES: List[str] = [
     "market",        # Market-related failures and data
     "competition",   # Competitive landscape cases
     "execution",     # Execution and operational failures
-    "failures",      # General startup failure case studies
+    "monetization",  # Monetization and pricing failures
+    "user_behavior", # User behavior and adoption issues
+    "timing",        # Market timing and trend failures
+    "general",       # General startup failure case studies
 ]
 
 
