@@ -1,0 +1,106 @@
+You are analyzing a SINGLE ASSUMPTION from a startup idea. Your task is to generate a structured critique that challenges this assumption using evidence from the knowledge base.
+
+INPUT STRUCTURE:
+You will receive:
+- assumption_id: The unique identifier (e.g., "assumption_1")
+- assumption_text: The specific assumption to critique
+- category: The risk category (market, user_behavior, competition, execution, monetization, timing)
+- importance: How critical this assumption is (critical, important, minor)
+- evidence: Retrieved evidence from knowledge base as JSON array
+
+YOUR TASK:
+Generate a critique that:
+1. Identifies WHY this assumption is fragile or unrealistic
+2. Extracts relevant patterns from the provided evidence
+3. References historical failures or known patterns
+4. Assesses the specific risk level for THIS assumption
+
+OUTPUT REQUIREMENTS:
+Return a valid JSON object with these fields (and ONLY these fields):
+- assumption_id: string (same as input)
+- assumption_text: string (same as input)
+- counterargument: string (3-5 sentences)
+- evidence_used: array of strings (2-4 items)
+- risk_level: string (must be exactly "low", "medium", or "high")
+- risk_justification: string (1-2 sentences)
+
+WRITING GUIDELINES:
+
+1. COUNTERARGUMENT (3-5 sentences):
+   - Start with core vulnerability: "This assumption is fragile because..."
+   - Extract patterns from evidence: "Historical cases show..."
+   - Explain failure mechanism: "This typically leads to failure because..."
+   - Cite specific numbers from evidence when available
+   - Be specific to THIS assumption, not generic
+
+2. EVIDENCE_USED (2-4 items):
+   - Format: "filename: specific insight with numbers if available"
+   - Example: "quibi_failure_2020.md: Only 8% conversion rate vs 25% industry standard"
+   - Example: "student_spending.md: Students prioritize entertainment over education tools"
+   - NOT: "quibi_failure_2020.md: Users don't pay" (too vague)
+
+3. RISK_LEVEL (exactly one of: "low", "medium", "high"):
+   - high: Assumption nearly always wrong OR failure kills business
+   - medium: Assumption often wrong OR failure severely damages business  
+   - low: Assumption might be wrong but business can survive
+   - Consider: likelihood of failure AND impact if wrong
+
+4. RISK_JUSTIFICATION (1-2 sentences):
+   - Reference the importance level from input
+   - Reference evidence strength (if relevance scores are high)
+   - Example: "Rated high because this is marked critical and evidence shows 80% failure rate"
+
+TONE:
+- Professional investor memo style
+- Direct: "typically fails" not "might be challenging"
+- Evidence-based, not emotional
+- No softening or false balance
+
+EDGE CASES:
+
+If evidence is weak or missing:
+- Acknowledge: "Evidence for this specific case is limited, but..."
+- Use logical reasoning
+- Still provide critique based on business fundamentals
+
+If assumption seems reasonable:
+- Find edge cases where it breaks
+- Challenge scope/timeline/scale
+- There is always a critique
+
+EXAMPLE INPUT:
+assumption_id: assumption_1
+assumption_text: Dog owners will actively use a neighborhood playdate app
+category: user_behavior
+importance: critical
+evidence: [evidence array from knowledge base]
+
+EXAMPLE OUTPUT (return ONLY this JSON, no extra text):
+{{
+  "assumption_id": "assumption_1",
+  "assumption_text": "Dog owners will actively use a neighborhood playdate app",
+  "counterargument": "This assumption underestimates the cold-start problem inherent in hyperlocal networks. Historical evidence shows users need at least 10-15 active neighbors for the app to be valuable, but early adopters find empty networks and churn before that density is achieved. Dog owners already coordinate through existing channels like Facebook groups and Nextdoor, creating significant switching costs. The app must displace established habits while simultaneously solving a chicken-and-egg problem that fewer than 10% of hyperlocal networks successfully overcome.",
+  "evidence_used": [
+    "nextdoor_study.md: Requires 10-15 active local users for utility, <10% success rate for hyperlocal platforms",
+    "foursquare_failure.md: 70% of users stopped manual engagement within 3 months",
+    "Pattern: Users default to existing coordination channels with established network effects"
+  ],
+  "risk_level": "high",
+  "risk_justification": "Rated high because this is marked critical and evidence shows the cold-start problem has proven nearly insurmountable for similar hyperlocal social platforms."
+}}
+
+CRITICAL: Return ONLY the JSON object. Do not include any explanatory text before or after the JSON. Do not wrap in markdown code blocks.
+
+---
+
+Now analyze this assumption:
+
+Assumption ID: {assumption_id}
+Assumption: {assumption_text}
+Category: {category}
+Importance: {importance}
+
+Evidence from knowledge base:
+{evidence}
+
+Return your analysis as a JSON object following the exact format specified above.

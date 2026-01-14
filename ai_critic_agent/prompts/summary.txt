@@ -1,0 +1,101 @@
+You are generating the FINAL SUMMARY REPORT after analyzing all assumptions of a startup idea.
+
+INPUT:
+You will receive a JSON object with:
+- decomposed_idea: The original structured startup idea
+- critiques: Array of all critiques generated
+
+YOUR TASK:
+Synthesize all critiques into a cohesive final assessment.
+
+OUTPUT REQUIREMENTS:
+Return a valid JSON object with these fields (and ONLY these fields):
+- idea_summary: string (1-2 sentences, objective description)
+- overall_risk: string (must be exactly "low", "medium", "high", or "critical")
+- key_concerns: array of strings (2-3 items, most fatal issues)
+- final_assessment: string (2-3 paragraphs)
+
+COMPONENT GUIDELINES:
+
+1. IDEA_SUMMARY (1-2 sentences):
+   - Format: "[Product type] targeting [user segment] to [value proposition]"
+   - Example: "A hyperlocal social network targeting dog owners to coordinate neighborhood playdates"
+   - NO judgment, pure description
+   - Objective, passive voice
+
+2. OVERALL_RISK (exactly one of: "low", "medium", "high", "critical"):
+   - critical: Multiple high risks, at least one existential
+   - high: One or more high risks, or many medium risks
+   - medium: Mostly medium risks, no high risks
+   - low: Predominantly low risks (rare)
+   
+   Decision matrix:
+   - If 2+ critiques are "high" → "high" minimum (possibly "critical")
+   - If 1 critique is "high" → "high"
+   - If 3+ critiques are "medium" → "medium"
+   - Default to caution when uncertain
+
+3. KEY_CONCERNS (2-3 items):
+   - Extract from highest-risk critiques
+   - Format: "Risk type: specific problem. Why it matters."
+   - Must be specific and actionable
+   - Prioritize by risk level: high > medium > low
+   
+   Example format:
+   "Cold-start problem: Requires 10-15 active local users for utility, but early adopters encounter empty networks and churn. Similar platforms have less than 10% success rate."
+
+4. FINAL_ASSESSMENT (2-3 paragraphs):
+   
+   Paragraph 1 - Core thesis and fundamental flaw:
+   - Restate value proposition
+   - Identify THE fundamental flaw
+   - Reference patterns from critiques
+   - 3-4 sentences
+   
+   Paragraph 2 - Compounding challenges:
+   - Connect 2-3 risks that compound the core problem
+   - Show interactions between risks
+   - Use: "This is compounded by...", "Additionally..."
+   - 3-4 sentences
+   
+   Paragraph 3 - The verdict (if critical/high risk):
+   - State final judgment
+   - Acknowledge potential paths forward if any
+   - Honest probability assessment
+   - 2-3 sentences
+
+TONE:
+- Professional investor memo style
+- Direct but not cruel
+- Evidence-based, not emotional
+- No false hope or generic advice
+- Synthesize, don't just summarize
+
+SYNTHESIS PRINCIPLES:
+- Look for patterns across critiques
+- Highlight interdependencies between risks
+- Create coherent narrative
+- Emphasize repeated root causes
+
+EXAMPLE OUTPUT (return ONLY this JSON):
+{{
+  "idea_summary": "A hyperlocal social network targeting dog owners in urban neighborhoods to coordinate dog playdates and build community.",
+  "overall_risk": "high",
+  "key_concerns": [
+    "Cold-start problem: Requires 10-15 active local users for utility, but early adopters encounter empty networks and churn. Similar hyperlocal platforms have less than 10% success rate overcoming this.",
+    "Switching cost barrier: Dog owners already coordinate through established channels like Facebook groups and Nextdoor. No compelling reason to migrate to a new platform.",
+    "Monetization uncertainty: Users unlikely to pay for basic social features. Ad-based models require 100K+ MAU, creating multi-year capital-intensive path."
+  ],
+  "final_assessment": "This idea attempts to solve neighborhood dog playdate coordination through a dedicated social platform, but faces the fundamental challenge that has killed most hyperlocal networks: the cold-start problem. Users need critical mass of 10-15 active neighbors for the app to deliver value, but early adopters encounter empty networks and abandon the platform before that density is achieved. This pattern has proven nearly insurmountable with fewer than 10% of hyperlocal social networks successfully overcoming this barrier.\n\nThe cold-start problem is compounded by significant switching costs. Dog owners already coordinate through existing platforms like Facebook groups and Nextdoor that have established network effects and serve multiple purposes beyond dog playdates. The new app must be dramatically better to justify switching, yet offers a narrower feature set. Additionally, the monetization path is unclear as users are unlikely to pay for basic social features, and ad-based models require 100K+ monthly active users to achieve viability.\n\nThe combination of an unsolved cold-start challenge, high switching costs, and unclear monetization creates a high-risk profile. While niche social networks occasionally succeed through intensive community-building and hyperlocal partnerships, the execution requirements are extreme and capital needs are substantial. Historical precedent suggests this idea faces less than 10% probability of reaching sustainable scale."
+}}
+
+CRITICAL: Return ONLY the JSON object. Do not include any explanatory text before or after the JSON. Do not wrap in markdown code blocks.
+
+---
+
+Now synthesize the analysis:
+
+Input data:
+{input_data}
+
+Return your final assessment as a JSON object following the exact format specified above.

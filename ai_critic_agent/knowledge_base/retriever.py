@@ -40,6 +40,11 @@ class CriticKnowledgeBase:
             index_dir: Directory containing FAISS index and metadata
             embedding_model: Same model used during indexing
         """
+        # Mac M4 FIX: Set environment before loading models
+        import os
+        os.environ['TOKENIZERS_PARALLELISM'] = 'false'
+        os.environ['OMP_NUM_THREADS'] = '1'
+        
         self.index_dir = Path(index_dir)
         
         # Check if index exists
@@ -65,9 +70,12 @@ class CriticKnowledgeBase:
         self.chunk_texts = data["chunk_texts"]
         self.embedding_dim = data["embedding_dim"]
         
-        # Load embedding model
+        # Load embedding model with Mac M4 safe settings
         print(f"Loading embedding model: {embedding_model}...")
-        self.embedding_model = SentenceTransformer(embedding_model)
+        self.embedding_model = SentenceTransformer(
+            embedding_model,
+            device='cpu'  # Force CPU for Mac M4
+        )
         print(f"✅ Model loaded (dim={self.embedding_dim})")
     
     def query(
