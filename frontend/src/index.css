@@ -1,0 +1,56 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  background: #FAFAF8;
+  color: #111111;
+  font-family: 'DM Sans', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: #F2F1ED; }
+::-webkit-scrollbar-thumb { background: #DDDDDD; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #E8143A; }
+* { scrollbar-width: thin; scrollbar-color: #DDDDDD #F2F1ED; }
+
+@layer components {
+  /* Red-to-dark gradient text for headlines */
+  .gradient-text {
+    background: linear-gradient(135deg, #E8143A 0%, #FF3B5C 60%, #FF6B6B 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  /* Standard content card */
+  .card {
+    background: #FFFFFF;
+    border: 1px solid #EBEBEB;
+    border-radius: 16px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04);
+  }
+
+  /* Skeleton shimmer — light mode */
+  .shimmer-bg {
+    background: linear-gradient(90deg, #F2F1ED 25%, #EBEBEB 50%, #F2F1ED 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+  }
+}
+
+@layer utilities {
+  .font-display { font-family: 'Fraunces', Georgia, serif; }
+
+  .animation-delay-100 { animation-delay: 100ms; }
+  .animation-delay-200 { animation-delay: 200ms; }
+  .animation-delay-300 { animation-delay: 300ms; }
+  .animation-delay-400 { animation-delay: 400ms; }
+  .animation-delay-500 { animation-delay: 500ms; }
+  .animation-delay-600 { animation-delay: 600ms; }
+  .animation-delay-700 { animation-delay: 700ms; }
+  .animation-delay-800 { animation-delay: 800ms; }
+}

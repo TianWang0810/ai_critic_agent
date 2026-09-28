@@ -63,5 +63,14 @@ dependencies:
       - unstructured
       - markdown
 
+      # ===== 数据库 =====
+      - sqlalchemy>=2.0
+      - psycopg2-binary       # PostgreSQL driver
+      - aiosqlite             # SQLite async (local dev fallback)
+
+      # ===== AWS Lambda =====
+      - mangum                # ASGI adapter for AWS Lambda
+
       # ===== CLI / 工具 =====
       - typer
+      - python-dotenv

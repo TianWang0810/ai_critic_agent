@@ -232,7 +232,7 @@ class CriticResponse(BaseModel):
 class UserInput(BaseModel):
     """
     User's input to the system
-    
+
     Single startup idea as plain text.
     """
     idea: str = Field(
@@ -240,10 +240,60 @@ class UserInput(BaseModel):
         min_length=10,
         max_length=1000
     )
-    
+
     class Config:
         json_schema_extra = {
             "example": {
                 "idea": "A social network for dog owners to arrange playdates in their neighborhood"
+            }
+        }
+
+
+class EvaluationConfig(BaseModel):
+    """
+    Configurable evaluation harness settings
+
+    Controls critique criteria, model selection, and evaluation workflow.
+    """
+    model_name: str = Field(
+        default="gpt-4o",
+        description="OpenAI model to use for evaluation"
+    )
+    temperature: float = Field(
+        default=0.7,
+        ge=0.0,
+        le=1.0,
+        description="LLM temperature for critique generation"
+    )
+    focus_categories: Optional[List[RiskCategory]] = Field(
+        default=None,
+        description="Risk categories to prioritize. If None, all categories are evaluated."
+    )
+    evidence_count: int = Field(
+        default=5,
+        ge=1,
+        le=10,
+        description="Number of evidence items to retrieve per assumption"
+    )
+    max_assumptions: int = Field(
+        default=8,
+        ge=3,
+        le=15,
+        description="Maximum number of assumptions to critique"
+    )
+    min_risk_threshold: RiskLevel = Field(
+        default=RiskLevel.LOW,
+        description="Only report critiques at or above this risk level"
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "model_name": "gpt-4o",
+                "temperature": 0.7,
+                "focus_categories": ["market", "competition"],
+                "evidence_count": 5,
+                "max_assumptions": 8,
+                "min_risk_threshold": "medium"
             }
         }

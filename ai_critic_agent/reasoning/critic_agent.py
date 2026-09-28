@@ -1,7 +1,6 @@
 """
-Critic Agent - Main Reasoning & Orchestration
-Coordinates all modules to generate structured critiques
-Uses Anthropic Claude for reliable LLM calls
+Critic Agent - Multi-stage LLM Reasoning with LangChain
+Orchestrates decomposition → RAG retrieval → critique → verdict pipeline
 """
 
 import os
@@ -12,14 +11,19 @@ os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 os.environ['OMP_NUM_THREADS'] = '1'
 
 import json
-import re
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 from dotenv import load_dotenv
 
 load_dotenv()
 
-from openai import OpenAI
+# LangChain imports
+from langchain_openai import ChatOpenAI
+from langchain_core.prompts import ChatPromptTemplate, HumanMessagePromptTemplate
+from langchain_core.messages import SystemMessage
+from langchain_core.output_parsers import JsonOutputParser
 
 from common.schemas import (
     DecomposedIdea,
@@ -27,9 +31,10 @@ from common.schemas import (
     Critique,
     FinalVerdict,
     CriticResponse,
+    EvaluationConfig,
     RiskLevel,
     SuccessProbability,
-    RiskCategory
+    RiskCategory,
 )
 from common.constants import get_overall_risk_from_critiques
 
@@ -39,399 +44,297 @@ from knowledge_base.retriever import CriticKnowledgeBase
 
 class CriticAgent:
     """
-    Main Critic Agent
-    
-    Orchestrates the complete critique pipeline:
-    1. Decompose idea into assumptions (via IdeaDecomposer)
-    2. Query knowledge base for each assumption
-    3. Generate critiques using LLM + evidence + prompts
-    4. Synthesize final verdict
+    Multi-stage LLM reasoning agent for startup idea evaluation.
+
+    Pipeline:
+      1. Decompose idea into structured assumptions (IdeaDecomposer)
+      2. Semantic evidence retrieval per assumption (FAISS RAG)
+      3. Per-assumption critique via LangChain LCEL chain
+      4. Final verdict synthesis via LangChain LCEL chain
+
+    LangChain chains are built at initialization time and reused across calls,
+    keeping per-request latency low.
     """
-    
+
     def __init__(
         self,
         model_name: Optional[str] = None,
         temperature: float = 0.7,
-        prompts_dir: str = "prompts"
+        prompts_dir: str = "prompts",
+        config: Optional[EvaluationConfig] = None,
     ):
-        """Initialize the Critic Agent"""
-        
-        # Read model from env
-        if model_name is None:
-            model_name = os.getenv("OPENAI_MODEL", "gpt-4o")
-        
-        self.model_name = model_name
-        self.temperature = temperature
-        
-        # Initialize OpenAI client
-        self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        
+        # EvaluationConfig drives model/temperature/thresholds when supplied
+        self.config = config or EvaluationConfig()
+        self.model_name = model_name or self.config.model_name or os.getenv("OPENAI_MODEL", "gpt-4o")
+        self.temperature = temperature or self.config.temperature
+
         self.prompts_dir = Path(prompts_dir)
-        
-        # Initialize sub-modules
-        self.decomposer = IdeaDecomposer()
-        self.knowledge_base = CriticKnowledgeBase()
-        
-        # Load prompts
+
+        # Load prompt files
         self.system_prompt = self._load_prompt("system.txt")
         self.critique_prompt = self._load_prompt("critique.txt")
         self.summary_prompt = self._load_prompt("summary.txt")
-    
+
+        # LangChain LLM — JSON mode enforced via model_kwargs
+        self.llm = ChatOpenAI(
+            model=self.model_name,
+            temperature=self.temperature,
+            api_key=os.getenv("OPENAI_API_KEY"),
+            model_kwargs={"response_format": {"type": "json_object"}},
+        )
+
+        # Shared JSON output parser
+        self._json_parser = JsonOutputParser()
+
+        # LCEL chains built once and reused
+        self.critique_chain = self._build_critique_chain()
+        self.verdict_chain = self._build_verdict_chain()
+
+        # Sub-modules
+        self.decomposer = IdeaDecomposer(model_name=self.model_name)
+        self.knowledge_base = CriticKnowledgeBase()
+
+    # ------------------------------------------------------------------
+    # Chain construction (LangChain LCEL)
+    # ------------------------------------------------------------------
+
+    def _build_critique_chain(self):
+        """
+        Build the per-assumption critique chain.
+
+        critique.txt already uses {assumption_id}, {assumption_text},
+        {category}, {importance}, {evidence} as template variables.
+        """
+        prompt = ChatPromptTemplate.from_messages([
+            SystemMessage(content=self.system_prompt),
+            HumanMessagePromptTemplate.from_template(self.critique_prompt),
+        ])
+        return prompt | self.llm | self._json_parser
+
+    def _build_verdict_chain(self):
+        """
+        Build the final verdict synthesis chain.
+
+        summary.txt uses {input_data} as the single template variable.
+        """
+        prompt = ChatPromptTemplate.from_messages([
+            SystemMessage(content=self.system_prompt),
+            HumanMessagePromptTemplate.from_template(self.summary_prompt),
+        ])
+        return prompt | self.llm | self._json_parser
+
+    # ------------------------------------------------------------------
+    # Prompt loading
+    # ------------------------------------------------------------------
+
     def _load_prompt(self, filename: str) -> str:
-        """Load a prompt file as plain text"""
         path = self.prompts_dir / filename
         try:
-            with open(path, 'r', encoding='utf-8') as f:
+            with open(path, "r", encoding="utf-8") as f:
                 return f.read()
         except FileNotFoundError:
             raise FileNotFoundError(f"Prompt file not found: {path}")
-    
-    def _clean_json_response(self, response: str) -> str:
-        """
-        Clean LLM response to extract valid JSON
-        
-        LLM might wrap JSON in markdown code blocks or add explanations
-        """
-        response = response.strip()
-        
-        # Remove markdown code blocks
-        if "```json" in response:
-            # Extract content between ```json and ```
-            start = response.find("```json") + 7
-            end = response.find("```", start)
-            if end != -1:
-                response = response[start:end]
-        elif "```" in response:
-            # Extract content between ``` and ```
-            start = response.find("```") + 3
-            end = response.find("```", start)
-            if end != -1:
-                response = response[start:end]
-        
-        response = response.strip()
-        
-        # Find JSON object boundaries
-        start = response.find('{')
-        end = response.rfind('}')
-        
-        if start != -1 and end != -1:
-            response = response[start:end+1]
-        
-        return response
-    
-    def _parse_json_safely(self, response_text: str, context: str = "") -> dict:
-        """
-        Safely parse JSON with better error reporting
-        
-        Args:
-            response_text: Raw LLM response
-            context: Description of what's being parsed (for error messages)
-            
-        Returns:
-            dict: Parsed JSON
-            
-        Raises:
-            ValueError: If JSON cannot be parsed
-        """
-        try:
-            cleaned = self._clean_json_response(response_text)
-            return json.loads(cleaned)
-        except json.JSONDecodeError as e:
-            # Print debug info
-            print(f"\n⚠️  JSON Parse Error in {context}:")
-            print(f"   Error: {e}")
-            print(f"   Position: line {e.lineno}, column {e.colno}")
-            print(f"\n   Raw response (first 500 chars):")
-            print(f"   {response_text[:500]}")
-            print(f"\n   Cleaned response (first 500 chars):")
-            cleaned = self._clean_json_response(response_text)
-            print(f"   {cleaned[:500]}")
-            
-            raise ValueError(
-                f"Failed to parse {context} as JSON. "
-                f"LLM may have returned malformed JSON or included extra text."
-            )
-    
-    def _format_evidence_for_prompt(
-        self,
-        retrieval_result
-    ) -> List[Dict[str, Any]]:
-        """
-        Format RetrievalResult into structure expected by critique prompt
-        
-        Args:
-            retrieval_result: RetrievalResult from knowledge base
-            
-        Returns:
-            List of evidence dicts for prompt
-        """
-        evidence_list = []
-        
-        for item in retrieval_result.evidence:
-            evidence_list.append({
+
+    # ------------------------------------------------------------------
+    # Evidence formatting
+    # ------------------------------------------------------------------
+
+    def _format_evidence_for_prompt(self, retrieval_result) -> List[Dict[str, Any]]:
+        return [
+            {
                 "source": item.source,
                 "content": item.content,
                 "relevance_score": item.relevance_score,
-                "category": item.category.value  # Enum → str
-            })
-        
-        return evidence_list
-    
-    def critique_idea(self, idea: str) -> CriticResponse:
+                "category": item.category.value,
+            }
+            for item in retrieval_result.evidence
+        ]
+
+    # ------------------------------------------------------------------
+    # Main pipeline
+    # ------------------------------------------------------------------
+
+    def critique_idea(
+        self,
+        idea: str,
+        config: Optional[EvaluationConfig] = None,
+    ) -> CriticResponse:
         """
-        Main method: Complete critique pipeline
-        
+        Run the full multi-stage critique pipeline.
+
         Args:
-            idea: User's startup idea (natural language)
-            
+            idea: Startup idea in natural language
+            config: Optional per-request config override
+
         Returns:
-            CriticResponse: Complete structured critique
+            CriticResponse with all critiques and final verdict
         """
+        cfg = config or self.config
         print(f"🔍 Analyzing idea: '{idea[:80]}...'")
-        
-        # Step 1: Decompose idea
-        print("\n📋 Step 1: Decomposing idea...")
+
+        # Stage 1: Decompose
+        print("\n📋 Stage 1: Decomposing idea into assumptions...")
         decomposed = self.decomposer.decompose(idea, return_json=False)
-        print(f"   ✅ Found {len(decomposed.assumptions)} assumptions")
-        
-        # Step 2: Critique each assumption
-        print("\n💭 Step 2: Generating critiques...")
-        critiques = []
-        
-        for i, assumption in enumerate(decomposed.assumptions, 1):
-            print(f"   [{i}/{len(decomposed.assumptions)}] {assumption.assumption[:60]}...")
-            
-            try:
-                critique = self._critique_assumption(assumption, decomposed)
-                critiques.append(critique)
-                print(f"      → Risk: {critique.risk_level.value.upper()}")
-            except Exception as e:
-                print(f"      ⚠️  Error: {e}")
-                # Continue with other assumptions
-                continue
-        
+
+        # Apply max_assumptions cap from config
+        if len(decomposed.assumptions) > cfg.max_assumptions:
+            decomposed.assumptions = decomposed.assumptions[: cfg.max_assumptions]
+
+        # Apply category filter if configured
+        if cfg.focus_categories:
+            decomposed.assumptions = [
+                a for a in decomposed.assumptions
+                if a.category in cfg.focus_categories
+            ] or decomposed.assumptions  # fall back to all if filter too restrictive
+
+        print(f"   ✅ {len(decomposed.assumptions)} assumptions identified")
+
+        # Stage 2 + 3: Retrieve evidence & critique all assumptions in parallel
+        n = len(decomposed.assumptions)
+        print(f"\n💭 Stage 2–3: RAG retrieval + LangChain critique ({n} assumptions, parallel)...")
+
+        from common.constants import RISK_LEVEL_SCORES
+
+        def _critique_task(args: Tuple[int, StartupAssumption]):
+            idx, assumption = args
+            return idx, self._critique_assumption(assumption, decomposed, cfg)
+
+        results: List[Optional[Critique]] = [None] * n
+
+        with ThreadPoolExecutor(max_workers=min(n, 8)) as pool:
+            futures = {
+                pool.submit(_critique_task, (i, a)): i
+                for i, a in enumerate(decomposed.assumptions)
+            }
+            for future in as_completed(futures):
+                try:
+                    idx, critique = future.result()
+                    assumption_text = decomposed.assumptions[idx].assumption[:60]
+                    if RISK_LEVEL_SCORES[critique.risk_level] >= RISK_LEVEL_SCORES[cfg.min_risk_threshold]:
+                        results[idx] = critique
+                        print(f"   ✅ [{idx+1}/{n}] {assumption_text}... → {critique.risk_level.value.upper()}")
+                    else:
+                        print(f"   ⏭️  [{idx+1}/{n}] {assumption_text}... → skipped (below threshold)")
+                except Exception as e:
+                    idx = futures[future]
+                    print(f"   ⚠️  [{idx+1}/{n}] Error: {e}")
+
+        critiques: List[Critique] = [r for r in results if r is not None]
+
         if not critiques:
-            raise RuntimeError("Failed to generate any critiques")
-        
-        # Step 3: Generate final verdict
-        print("\n⚖️  Step 3: Synthesizing verdict...")
+            raise RuntimeError("No critiques generated — check assumptions and config thresholds")
+
+        # Stage 4: Verdict synthesis
+        print("\n⚖️  Stage 4: Synthesizing final verdict via LangChain chain...")
         verdict = self._generate_verdict(critiques, decomposed)
         print(f"   ✅ Overall risk: {verdict.overall_risk.value.upper()}")
-        
-        # Step 4: Build response
+
         response = CriticResponse(
             idea_summary=decomposed.value_proposition,
             critiques=critiques,
-            verdict=verdict
+            verdict=verdict,
         )
-        
         print("\n✅ Critique complete!")
         return response
-    
+
+    # ------------------------------------------------------------------
+    # Internal: per-assumption critique
+    # ------------------------------------------------------------------
+
     def _critique_assumption(
         self,
         assumption: StartupAssumption,
-        decomposed: DecomposedIdea
+        decomposed: DecomposedIdea,
+        config: EvaluationConfig,
     ) -> Critique:
         """
-        Critique a single assumption
-        
-        Args:
-            assumption: The assumption to critique
-            decomposed: Full decomposed idea for context
-            
-        Returns:
-            Critique: Structured critique with counterarguments
+        Critique one assumption using FAISS evidence + LangChain LCEL chain.
         """
-        # Query knowledge base for evidence
+        # RAG retrieval from FAISS knowledge base
         retrieval_result = self.knowledge_base.query(
             assumption=assumption.assumption,
             category=assumption.category,
-            top_k=5
+            top_k=config.evidence_count,
         )
-        
-        # Format evidence for prompt
         evidence_list = self._format_evidence_for_prompt(retrieval_result)
-        
-        # Format evidence as JSON
-        evidence_json = json.dumps(evidence_list, indent=2, ensure_ascii=False)
-        
-        # Build critique prompt
-        critique_user_prompt = f"""Analyze this assumption:
 
-Assumption ID: {assumption.id}
-Assumption: {assumption.assumption}
-Category: {assumption.category.value}
-Importance: {assumption.importance.value}
+        # Invoke the LangChain critique chain
+        critique_dict = self.critique_chain.invoke({
+            "assumption_id": assumption.id,
+            "assumption_text": assumption.assumption,
+            "category": assumption.category.value,
+            "importance": assumption.importance.value,
+            "evidence": json.dumps(evidence_list, indent=2, ensure_ascii=False),
+        })
 
-Evidence from knowledge base:
-{evidence_json}
-
-Following the instructions in your system prompt, generate a critique as a JSON object."""
-        
-        # Call OpenAI
-        try:
-            response = self.client.chat.completions.create(
-                model=self.model_name,
-                messages=[
-                    {"role": "system", "content": self.system_prompt + "\n\n" + self.critique_prompt},
-                    {"role": "user", "content": critique_user_prompt}
-                ],
-                temperature=self.temperature,
-                response_format={"type": "json_object"}
-            )
-            
-            response_text = response.choices[0].message.content
-            
-        except Exception as e:
-            raise ValueError(f"OpenAI API call failed: {e}")
-        
-        # Parse JSON response with better error handling
-        try:
-            critique_dict = self._parse_json_safely(
-                response_text, 
-                context=f"critique for {assumption.id}"
-            )
-        except ValueError as e:
-            # Log error and skip this assumption
-            print(f"      ⚠️  JSON parse failed, skipping: {e}")
-            raise
-        
-        # Validate required fields
-        required_fields = ["assumption_id", "assumption_text", "counterargument", 
-                          "evidence_used", "risk_level"]
-        missing_fields = [f for f in required_fields if f not in critique_dict]
-        
-        if missing_fields:
-            raise ValueError(
-                f"LLM response missing required fields: {missing_fields}\n"
-                f"Response: {response_text[:200]}..."
-            )
-        
-        # Build Critique object
-        critique = Critique(
+        return Critique(
             assumption_id=critique_dict["assumption_id"],
             assumption_text=critique_dict["assumption_text"],
             counterargument=critique_dict["counterargument"],
             evidence_used=critique_dict["evidence_used"],
-            risk_level=RiskLevel(critique_dict["risk_level"])  # str → Enum
+            risk_level=RiskLevel(critique_dict["risk_level"]),
         )
-        
-        return critique
-    
+
+    # ------------------------------------------------------------------
+    # Internal: verdict synthesis
+    # ------------------------------------------------------------------
+
     def _generate_verdict(
         self,
         critiques: List[Critique],
-        decomposed: DecomposedIdea
+        decomposed: DecomposedIdea,
     ) -> FinalVerdict:
         """
-        Generate final overall verdict
-        
-        Args:
-            critiques: List of all assumption critiques
-            decomposed: Decomposed idea for context
-            
-        Returns:
-            FinalVerdict: Overall assessment
+        Synthesize a final verdict from all assumption critiques via LangChain chain.
         """
-        # Prepare input for summary prompt
-        decomposed_dict = decomposed.model_dump()
-        
-        # Convert critiques to dicts with Enum → str
-        critiques_dict = []
-        for c in critiques:
-            critiques_dict.append({
+        critiques_serializable = [
+            {
                 "assumption_id": c.assumption_id,
                 "assumption_text": c.assumption_text,
                 "counterargument": c.counterargument,
                 "evidence_used": c.evidence_used,
-                "risk_level": c.risk_level.value  # Enum → str
-            })
-        
-        # Format input as JSON
-        summary_input = {
-            "decomposed_idea": decomposed_dict,
-            "critiques": critiques_dict
-        }
-        
-        summary_json = json.dumps(summary_input, indent=2, ensure_ascii=False)
-        
-        # Build summary prompt
-        summary_user_prompt = f"""Synthesize the final verdict for this startup analysis:
+                "risk_level": c.risk_level.value,
+            }
+            for c in critiques
+        ]
 
-{summary_json}
+        analysis_input = json.dumps(
+            {
+                "decomposed_idea": decomposed.model_dump(),
+                "critiques": critiques_serializable,
+            },
+            indent=2,
+            ensure_ascii=False,
+        )
 
-Following the instructions in your system prompt, generate the final assessment as a JSON object."""
-        
-        # Call OpenAI
-        try:
-            response = self.client.chat.completions.create(
-                model=self.model_name,
-                messages=[
-                    {"role": "system", "content": self.system_prompt + "\n\n" + self.summary_prompt},
-                    {"role": "user", "content": summary_user_prompt}
-                ],
-                temperature=self.temperature,
-                response_format={"type": "json_object"}
-            )
-            
-            response_text = response.choices[0].message.content
-            
-        except Exception as e:
-            raise ValueError(f"OpenAI API call failed: {e}")
-        
-        # Parse JSON response with better error handling
-        try:
-            summary_dict = self._parse_json_safely(
-                response_text,
-                context="summary verdict"
-            )
-        except ValueError as e:
-            print(f"\n⚠️  Summary JSON parse failed: {e}")
-            raise
-        
-        # Calculate overall risk (use helper from constants)
+        # Invoke the LangChain verdict chain
+        summary_dict = self.verdict_chain.invoke({"input_data": analysis_input})
+
+        # Overall risk: prefer LLM assessment, fall back to algorithmic calculation
         overall_risk = get_overall_risk_from_critiques(critiques)
-        
-        # Override if LLM provided a different assessment
         if "overall_risk" in summary_dict:
             try:
                 overall_risk = RiskLevel(summary_dict["overall_risk"])
             except ValueError:
-                pass  # Keep calculated value
-        
-        # Map risk to success probability
+                pass
+
         success_probability = self._estimate_success_probability(overall_risk, critiques)
-        
-        # Build FinalVerdict
-        verdict = FinalVerdict(
+
+        return FinalVerdict(
             overall_risk=overall_risk,
-            key_concerns=summary_dict.get("key_concerns", [])[:5],  # Max 5
+            key_concerns=summary_dict.get("key_concerns", [])[:5],
             success_probability=success_probability,
-            summary=summary_dict.get("final_assessment", "")
+            summary=summary_dict.get("final_assessment", ""),
         )
-        
-        return verdict
-    
+
     def _estimate_success_probability(
         self,
         overall_risk: RiskLevel,
-        critiques: List[Critique]
+        critiques: List[Critique],
     ) -> SuccessProbability:
-        """
-        Map overall risk to success probability
-        
-        Args:
-            overall_risk: Overall risk level
-            critiques: All critiques
-            
-        Returns:
-            SuccessProbability enum value
-        """
         critical_count = sum(1 for c in critiques if c.risk_level == RiskLevel.CRITICAL)
         high_count = sum(1 for c in critiques if c.risk_level == RiskLevel.HIGH)
-        
-        # Decision matrix
+
         if overall_risk == RiskLevel.CRITICAL or critical_count >= 3:
             return SuccessProbability.VERY_LOW
         elif overall_risk == RiskLevel.HIGH or (critical_count >= 1 and high_count >= 2):
@@ -441,29 +344,17 @@ Following the instructions in your system prompt, generate the final assessment 
 
 
 # ============================================================
-# Convenience Function
+# Convenience function
 # ============================================================
 
 def critique_startup_idea(
     idea: str,
     model_name: str = "gpt-4o",
-    temperature: float = 0.7
+    temperature: float = 0.7,
+    config: Optional[EvaluationConfig] = None,
 ) -> CriticResponse:
-    """
-    Quick function to critique a startup idea
-    
-    Args:
-        idea: Startup idea text
-        model_name: OpenAI model to use
-        temperature: LLM temperature
-        
-    Returns:
-        CriticResponse: Complete critique
-    """
-    agent = CriticAgent(
-        model_name=model_name,
-        temperature=temperature
-    )
+    """Run a one-shot critique with optional EvaluationConfig."""
+    agent = CriticAgent(model_name=model_name, temperature=temperature, config=config)
     return agent.critique_idea(idea)
 
 
@@ -472,38 +363,31 @@ def critique_startup_idea(
 # ============================================================
 
 if __name__ == "__main__":
-    import sys
     from reasoning.formatter import CriticFormatter
-    
-    # Test idea
-    if len(sys.argv) > 1:
-        test_idea = " ".join(sys.argv[1:])
-    else:
-        test_idea = "A social network for dog owners to arrange playdates in their neighborhood"
-    
+
+    test_idea = (
+        " ".join(sys.argv[1:])
+        if len(sys.argv) > 1
+        else "A social network for dog owners to arrange playdates in their neighborhood"
+    )
+
     print("=" * 80)
     print("CRITIC AGENT TEST")
     print("=" * 80)
     print(f"\nIdea: {test_idea}\n")
-    
+
     try:
-        # Run critique
         agent = CriticAgent()
         response = agent.critique_idea(test_idea)
-        
-        # Format output
+
         formatter = CriticFormatter()
-        
         print("\n" + "=" * 80)
-        print("FORMATTED OUTPUT")
-        print("=" * 80)
         print(formatter.to_text(response, verbose=True))
-        
-        # Save JSON
+
         with open("critique_output.json", "w", encoding="utf-8") as f:
             f.write(response.model_dump_json(indent=2))
         print("\n✅ JSON saved to critique_output.json")
-        
+
     except Exception as e:
         print(f"\n❌ Error: {e}")
         import traceback
