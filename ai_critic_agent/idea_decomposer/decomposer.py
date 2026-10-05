@@ -151,9 +151,12 @@ class IdeaDecomposer:
                 print(f"   Expected keywords: {idea_keywords}")
                 print(f"   Found: {found_keywords}")
 
-            # Normalize assumption IDs
+            # Normalize assumption IDs and sanitize categories
+            valid_categories = {"market", "execution", "competition", "monetization", "user_behavior", "timing", "general"}
             for i, a in enumerate(data.get("assumptions", []), 1):
                 a["id"] = f"assumption_{i}"
+                if a.get("category") not in valid_categories:
+                    a["category"] = "general"
 
             # Keep risk_categories in sync with actual assumptions
             if data.get("assumptions"):

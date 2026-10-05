@@ -1,6 +1,6 @@
 import type { EvaluationDetail, EvaluationSummary } from '../types/api'
 
-const BASE_URL = '/api'
+const BASE_URL = '/api/v1'
 
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
